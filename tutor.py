@@ -28,6 +28,7 @@ class Tutor(object):
         self.soln = soln
         self.soln_sep = soln.split('.')
         self.sentence_embeddings = self.model.encode(self.soln_sep)
+        self.reset_user_state()
 
 
     def get_similarity(self, a, b):
@@ -68,7 +69,7 @@ class Tutor(object):
         return min_idx
 
 
-    def get_user_hint(self, user_input):
+    def get_hint(self, user_input):
         curr_embedding = self.model.encode(user_input)
         user_state = self.find_closest(curr_embedding)
 

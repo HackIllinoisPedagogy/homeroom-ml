@@ -2,3 +2,5 @@ stanza
 torch
 sentence_transformers
 scipy
+flask
+flask_cors
