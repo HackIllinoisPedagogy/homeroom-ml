@@ -4,6 +4,8 @@ import stanza
 from scipy import spatial
 from sentence_transformers import SentenceTransformer
 
+from collections import deque
+
 
 class Tutor(object):
     """Automated tutor that guides student through problem."""
@@ -91,7 +93,10 @@ class Tutor(object):
 
         for sent in doc.sentences:
             for word in sent.words:
-                if word.upos in set(["PROPN", "NOUN", "VERB"]):
+                if ((word.upos in ["PROPN", "NOUN", "VERB"]) and
+                    (word.deprel != "compound" and word.deprel != "appos") and
+                    (word.head != 0)):
+
                     possible.append(word)
 
         return possible
@@ -112,9 +117,29 @@ class Tutor(object):
         return graph
 
 
+    def get_under(self, node, graph):
+        frontier = deque([node])
+        visited = set([])
+
+        while len(frontier) > 0:
+            to_expand = frontier.popleft()
+            visited.add(to_expand)
+
+            if to_expand in graph:
+                for c in graph[to_expand]:
+                    if c not in frontier and c not in visited:
+                        frontier.append(c)
+
+        out = list(visited)
+        out.sort(key=lambda x: int(x.id))
+
+        return out
+
+
     def get_sub_hint(self, hint_idx):
         # First try to do the 'smarter' dependency-tree based hint generation
-        doc = self.nlp(hint_idx)
+        hint = self.soln_sep[hint_idx]
+        doc = self.nlp(hint)
         possible_keywords = self.get_possible_keywords(doc)
 
         if self.num_in_state > len(possible_keywords) and self.try_tree:
@@ -125,8 +150,16 @@ class Tutor(object):
             graph = self.make_graph(doc)
             hint_node = possible_keywords[self.num_in_state - 1]
 
+            possible_words = [word.text for word in possible_keywords]
+            word_embeddings = self.model.encode(possible_words)
+            similarities = [self.get_similarity(w_embedding, self.sentence_embeddings[hint_idx]) for w_embedding in word_embeddings]
 
+            ids = list(range(len(possible_words)))
+            ids.sort(key=lambda x: -similarities[x])
 
+            under = self.get_under(hint_node, graph)
+
+            return "Consider " + " ".join([u.text for u in under]) + ". How could this help?"
 
         # Find the most salient tokens of hint_idx
         tokens_sep = self.soln_sep[hint_idx].split(" ")
@@ -142,7 +175,7 @@ class Tutor(object):
             to_include.append(salient_ids[s_id])
             s_id += 1
 
-        return " ".join(tokens_sep[min(to_include): max(to_include) + 1])
+        return "Consider " + " ".join(tokens_sep[min(to_include): max(to_include) + 1]) + ". How could this help?"
 
 
     def reset_user_state(self):
