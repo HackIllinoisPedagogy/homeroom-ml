@@ -1,4 +1,6 @@
 import torch
+import stanza
+
 from scipy import spatial
 from sentence_transformers import SentenceTransformer
 
@@ -9,6 +11,7 @@ class Tutor(object):
     def __init__(self, n_sub_hint, soln=None):
         super(Tutor, self).__init__()
         self.model = SentenceTransformer('bert-base-nli-mean-tokens')
+        self.nlp = stanza.Pipeline('en')
         self.n_sub_hint = n_sub_hint
 
         if soln is not None:
@@ -16,6 +19,7 @@ class Tutor(object):
 
         self.curr_user_state = -1
         self.num_in_state = -1
+        self.try_tree = True
 
 
     def load_soln(self, soln):  # Given a solution, load it into the tutor
@@ -71,6 +75,7 @@ class Tutor(object):
         else:
             self.curr_user_state = user_state
             self.num_in_state = 1
+            self.try_tree = True
 
         if user_state == len(self.soln_sep)-1:
             return "You're very close!"
@@ -81,8 +86,49 @@ class Tutor(object):
         return sub_hint
 
 
+    def get_possible_keywords(self, doc):
+        possible = []
+
+        for sent in doc.sentences:
+            for word in sent.words:
+                if word.upos in set(["PROPN", "NOUN", "VERB"]):
+                    possible.append(word)
+
+        return possible
+
+
+    def make_graph(self, doc):
+        graph = {}
+
+        for sent in doc.sentences:
+            for word in sent.words:
+                h = sent.words[word.head - 1] if word.head != 0 else None
+
+                if h is not None:
+                    if h not in graph:
+                        graph[h] = []
+                    graph[h].append(word)
+
+        return graph
+
+
     def get_sub_hint(self, hint_idx):
-        # First find the most salient tokens of hint_idx
+        # First try to do the 'smarter' dependency-tree based hint generation
+        doc = self.nlp(hint_idx)
+        possible_keywords = self.get_possible_keywords(doc)
+
+        if self.num_in_state > len(possible_keywords) and self.try_tree:
+            self.try_tree = False
+            self.num_in_state = 1
+
+        if len(possible_keywords) > 0 and self.try_tree:
+            graph = self.make_graph(doc)
+            hint_node = possible_keywords[self.num_in_state - 1]
+
+
+
+
+        # Find the most salient tokens of hint_idx
         tokens_sep = self.soln_sep[hint_idx].split(" ")
         salient_ids = self.find_salient(self.soln_sep[hint_idx],
             sentence_embedding=self.sentence_embeddings[hint_idx], tokens_sep=tokens_sep)
@@ -97,6 +143,11 @@ class Tutor(object):
             s_id += 1
 
         return " ".join(tokens_sep[min(to_include): max(to_include) + 1])
+
+
+    def reset_user_state(self):
+        self.num_in_state = -1
+        self.curr_user_state = -1
 
 
 if __name__ == '__main__':

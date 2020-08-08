@@ -1,3 +1,4 @@
+stanza
 torch
 sentence_transformers
 scipy
