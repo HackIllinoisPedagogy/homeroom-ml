@@ -1,6 +1,9 @@
 import torch
 import stanza
 
+import re
+import sys
+
 from scipy import spatial
 from sentence_transformers import SentenceTransformer
 
@@ -27,6 +30,14 @@ class Tutor(object):
     def load_soln(self, soln):  # Given a solution, load it into the tutor
         self.soln = soln
         self.soln_sep = soln.split('.')
+
+        new_soln_sep = []
+        for s in self.soln_sep:
+            if len(s.strip()) != 0:
+                new_soln_sep.append(s)
+
+        self.soln_sep = new_soln_sep
+
         self.sentence_embeddings = self.model.encode(self.soln_sep)
         self.reset_user_state()
 
@@ -89,8 +100,9 @@ class Tutor(object):
         return sub_hint
 
 
-    def get_possible_keywords(self, doc):
+    def get_possible_keywords(self, doc, cleaned_hint):
         possible = []
+        cleaned_hint_possible = cleaned_hint.split(" ")
 
         for sent in doc.sentences:
             for word in sent.words:
@@ -100,6 +112,7 @@ class Tutor(object):
 
                     possible.append(word)
 
+        possible = [p for p in possible if p in cleaned_hint_possible]
         return possible
 
 
@@ -137,11 +150,55 @@ class Tutor(object):
         return out
 
 
+    def in_latex(self, hint, token):
+        # Check if token is part of latex
+        hint_latex_strings = re.findall(r"[$].*?[$]", hint)
+
+        for l in hint_latex_strings:
+            if token in l:
+                return True
+
+        return False
+
+
+    def clean_hint_latex(self, hint, tokens):
+        l_active = False
+        out_tokens = []
+
+        for token in tokens:
+            if self.in_latex(hint, token):
+                # Update l_active
+                if not l_active:    # We do not already have a starting $
+                    if len(re.findall(r"[$].*?[$]", token)) == 0:   # Not self contained
+                        if "$" in token:
+                            l_active = True
+                        else:
+                            token = "$" + token
+                else:   # We had already started latex
+                    if "$" in token:
+                        l_active = False
+
+            out_tokens.append(token)
+
+        # Need to check if the last token improperly terminated latex
+        if self.in_latex(hint, out_tokens[-1]) and l_active:
+            out_tokens[-1] = out_tokens[-1] + "$"
+
+        return out_tokens
+
+
     def get_sub_hint(self, hint_idx):
         # First try to do the 'smarter' dependency-tree based hint generation
         hint = self.soln_sep[hint_idx]
+        print(len(hint), file=sys.stdout)
+        print(hint_idx, file=sys.stdout)
+        print(self.soln_sep, file=sys.stdout)
+
+        # Clean hint of any latex
+        cleaned_hint = re.sub("\$.*?\$", "", hint)
+
         doc = self.nlp(hint)
-        possible_keywords = self.get_possible_keywords(doc)
+        possible_keywords = self.get_possible_keywords(doc, cleaned_hint)
 
         if self.num_in_state > len(possible_keywords) and self.try_tree:
             self.try_tree = False
@@ -158,12 +215,14 @@ class Tutor(object):
             ids = list(range(len(possible_words)))
             ids.sort(key=lambda x: -similarities[x])
 
-            under = self.get_under(hint_node, graph)
+            under = [u.text for u in self.get_under(hint_node, graph)]
+            under = self.clean_hint_latex(hint, under)
 
-            return "Consider " + " ".join([u.text for u in under]) + ". How could this help?"
+            return "Consider " + " ".join(under) + ". How could this help?"
 
         # Find the most salient tokens of hint_idx
-        tokens_sep = self.soln_sep[hint_idx].split(" ")
+        tokens_sep = re.split(' |\n', self.soln_sep[hint_idx])
+        # tokens_sep = self.soln_sep[hint_idx].split(" ")
         salient_ids = self.find_salient(self.soln_sep[hint_idx],
             sentence_embedding=self.sentence_embeddings[hint_idx], tokens_sep=tokens_sep)
 
@@ -176,7 +235,10 @@ class Tutor(object):
             to_include.append(salient_ids[s_id])
             s_id += 1
 
-        return "Consider " + " ".join(tokens_sep[min(to_include): max(to_include) + 1]) + ". How could this help?"
+        including = tokens_sep[min(to_include): max(to_include) + 1]
+        including = self.clean_hint_latex(hint, including)
+
+        return "Consider " + " ".join(including) + ". How could this help?"
 
 
     def reset_user_state(self):
