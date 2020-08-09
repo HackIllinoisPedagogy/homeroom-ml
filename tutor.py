@@ -112,7 +112,7 @@ class Tutor(object):
 
                     possible.append(word)
 
-        possible = [p for p in possible if p in cleaned_hint_possible]
+        possible = [p for p in possible if p.text in cleaned_hint_possible]
         return possible
 
 
@@ -151,6 +151,10 @@ class Tutor(object):
 
 
     def in_latex(self, hint, token):
+
+        if len(token) == 0:
+            return False
+
         # Check if token is part of latex
         hint_latex_strings = re.findall(r"[$].*?[$]", hint)
 
@@ -190,9 +194,6 @@ class Tutor(object):
     def get_sub_hint(self, hint_idx):
         # First try to do the 'smarter' dependency-tree based hint generation
         hint = self.soln_sep[hint_idx]
-        print(len(hint), file=sys.stdout)
-        print(hint_idx, file=sys.stdout)
-        print(self.soln_sep, file=sys.stdout)
 
         # Clean hint of any latex
         cleaned_hint = re.sub("\$.*?\$", "", hint)
@@ -218,10 +219,15 @@ class Tutor(object):
             under = [u.text for u in self.get_under(hint_node, graph)]
             under = self.clean_hint_latex(hint, under)
 
+            print("Dependency tree based")
+            print(under, file=sys.stdout)
+
             return "Consider " + " ".join(under) + ". How could this help?"
 
         # Find the most salient tokens of hint_idx
         tokens_sep = re.split(' |\n', self.soln_sep[hint_idx])
+        tokens_sep = [t for t in tokens_sep if len(t) > 0]
+
         # tokens_sep = self.soln_sep[hint_idx].split(" ")
         salient_ids = self.find_salient(self.soln_sep[hint_idx],
             sentence_embedding=self.sentence_embeddings[hint_idx], tokens_sep=tokens_sep)
@@ -236,6 +242,9 @@ class Tutor(object):
             s_id += 1
 
         including = tokens_sep[min(to_include): max(to_include) + 1]
+        print("Saliency based")
+        print(including, file=sys.stdout)
+
         including = self.clean_hint_latex(hint, including)
 
         return "Consider " + " ".join(including) + ". How could this help?"
