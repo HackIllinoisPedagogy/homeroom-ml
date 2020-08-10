@@ -140,7 +140,8 @@ class Tutor(object):
 
         while len(frontier) > 0:
             to_expand = frontier.popleft()
-            visited.add(to_expand)
+            if to_expand.deprel != "case":
+                visited.add(to_expand)
 
             if to_expand in graph:
                 for c in graph[to_expand]:
@@ -259,7 +260,7 @@ class Tutor(object):
             print("Dependency tree based")
             print(under, file=sys.stdout)
 
-            return self.correct_grammar("Consider " + " ".join(under) + ". How could this help?")
+            return self.correct_grammar("Consider " + (" ".join(under)).lower() + ". How could this help?")
 
         # Find the most salient tokens of hint_idx
         tokens_sep = re.split(' |\n', self.soln_sep[hint_idx])
@@ -284,7 +285,7 @@ class Tutor(object):
 
         including = self.clean_hint_latex(hint, including)
 
-        return self.correct_grammar("Consider " + " ".join(including) + ". How could this help?")
+        return self.correct_grammar("Consider " + (" ".join(including)).lower() + ". How could this help?")
 
 
     def reset_user_state(self):
