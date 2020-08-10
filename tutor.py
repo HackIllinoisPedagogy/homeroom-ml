@@ -3,6 +3,7 @@ import stanza
 
 import re
 import sys
+import requests
 
 from scipy import spatial
 from sentence_transformers import SentenceTransformer
@@ -25,6 +26,8 @@ class Tutor(object):
         self.curr_user_state = -1
         self.num_in_state = -1
         self.try_tree = True
+        self.grammar_key = 'k94s3qewot7tswUd'
+        self.grammar_url = 'https://api.textgears.com/check.php'
 
 
     def load_soln(self, soln):  # Given a solution, load it into the tutor
@@ -151,7 +154,6 @@ class Tutor(object):
 
 
     def in_latex(self, hint, token):
-
         if len(token) == 0:
             return False
 
@@ -191,6 +193,41 @@ class Tutor(object):
         return out_tokens
 
 
+    def correct_grammar(self, sentence, sent_tokens=None):
+        req = {"key": self.grammar_key, "text": sentence}
+        errors = requests.get(self.grammar_url, req).json()['errors']
+        errors = [err for err in errors if not self.in_latex(sentence, err['bad'])]
+
+        print(errors, file=sys.stdout)
+
+        if sent_tokens is None:
+            sent_tokens = sentence.split(' ')
+
+        so_far = 0
+        curr_token = 0
+        curr_error = 0
+        replace_with = None
+
+        while True:
+            if curr_error == len(errors):
+                break
+
+            t = sent_tokens[curr_token]
+            so_far += len(t) + 1
+
+            if replace_with is not None:
+                sent_tokens[curr_token] = replace_with
+                replace_with = None
+
+            if so_far == errors[curr_error]['offset']:
+                replace_with = errors[curr_error]['better'][0]
+                curr_error+=1
+
+            curr_token+=1
+
+        return " ".join(sent_tokens)
+
+
     def get_sub_hint(self, hint_idx):
         # First try to do the 'smarter' dependency-tree based hint generation
         hint = self.soln_sep[hint_idx]
@@ -222,7 +259,7 @@ class Tutor(object):
             print("Dependency tree based")
             print(under, file=sys.stdout)
 
-            return "Consider " + " ".join(under) + ". How could this help?"
+            return self.correct_grammar("Consider " + " ".join(under) + ". How could this help?")
 
         # Find the most salient tokens of hint_idx
         tokens_sep = re.split(' |\n', self.soln_sep[hint_idx])
@@ -247,7 +284,7 @@ class Tutor(object):
 
         including = self.clean_hint_latex(hint, including)
 
-        return "Consider " + " ".join(including) + ". How could this help?"
+        return self.correct_grammar("Consider " + " ".join(including) + ". How could this help?")
 
 
     def reset_user_state(self):
