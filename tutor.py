@@ -107,11 +107,14 @@ class Tutor(object):
         possible = []
         cleaned_hint_possible = cleaned_hint.split(" ")
 
+        print(cleaned_hint, file=sys.stdout)
+
         for sent in doc.sentences:
             for word in sent.words:
                 if ((word.upos in ["PROPN", "NOUN", "VERB"]) and
                     (word.deprel != "compound" and word.deprel != "appos") and
-                    (word.head != 0)):
+                    (word.head != 0) and
+                    (not self.in_latex(cleaned_hint, word.text))):
 
                     possible.append(word)
 
@@ -168,6 +171,26 @@ class Tutor(object):
         return False
 
 
+    def clean_curly_braces(self, hint, tokens):
+        tokens_joined = " ".join(tokens)
+        num_pre = 0
+        num_post = 0
+
+        for c in tokens_joined:
+            if c == '{':
+                num_post+=1
+            elif c == '}':
+                if num_post > 0:
+                    num_post-=1
+                else:
+                    num_pre+=1
+
+        tokens_joined = ("".join(["{" for i in range(num_pre)]) +
+            tokens_joined + "".join(["}" for i in range(num_pre)]))
+
+        return tokens_joined.split(" ")
+
+
     def clean_hint_latex(self, hint, tokens):
         l_active = False
         out_tokens = []
@@ -191,7 +214,8 @@ class Tutor(object):
         if self.in_latex(hint, out_tokens[-1]) and l_active:
             out_tokens[-1] = out_tokens[-1] + "$"
 
-        return out_tokens
+        return self.clean_curly_braces(hint, out_tokens)
+        # return out_tokens
 
 
     def correct_grammar(self, sentence, sent_tokens=None):
@@ -238,6 +262,9 @@ class Tutor(object):
 
         doc = self.nlp(hint)
         possible_keywords = self.get_possible_keywords(doc, cleaned_hint)
+
+        print("Possible keywords", file=sys.stdout)
+        print(possible_keywords, file=sys.stdout)
 
         if self.num_in_state > len(possible_keywords) and self.try_tree:
             self.try_tree = False
