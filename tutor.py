@@ -107,7 +107,7 @@ class Tutor(object):
         possible = []
         cleaned_hint_possible = cleaned_hint.split(" ")
 
-        print(cleaned_hint, file=sys.stdout)
+        # print(cleaned_hint, file=sys.stdout)
 
         for sent in doc.sentences:
             for word in sent.words:
@@ -191,6 +191,46 @@ class Tutor(object):
         return tokens_joined.split(" ")
 
 
+    def clean_hint_latex_2(self, hint, tokens):
+        tokens_joined = " ".join(tokens)
+
+        print("tokens joined", file=sys.stdout)
+        print(tokens_joined, file=sys.stdout)
+
+        so_far = ""
+        need_to_check = True
+
+        prepend = False
+
+        prev_closing = True    # Was the last $ closing
+
+        for c in tokens_joined:
+            if c == '$':    # Is this closing something before, or opening a new one?
+                if need_to_check:
+                    if self.in_latex(hint, so_far):     # It is closing
+                        num_pre+=1
+                        prepend = True
+                    need_to_check = False
+                    prev_closing = False
+                else:
+                    prev_closing = not prev_closing
+            so_far += c
+
+        out = ""
+        if prepend:
+            out += "$"
+
+        out += tokens_joined
+
+        if not prev_closing:
+            out += "$"
+
+        if self.in_latex(hint, out) and "$" not in out:
+            out = "$" + out + "$"
+
+        return self.clean_curly_braces(hint, out.split(" "))
+
+
     def clean_hint_latex(self, hint, tokens):
         l_active = False
         out_tokens = []
@@ -223,7 +263,7 @@ class Tutor(object):
         errors = requests.get(self.grammar_url, req).json()['errors']
         errors = [err for err in errors if not self.in_latex(sentence, err['bad'])]
 
-        print(errors, file=sys.stdout)
+        # print(errors, file=sys.stdout)
 
         if sent_tokens is None:
             sent_tokens = sentence.split(' ')
@@ -237,6 +277,9 @@ class Tutor(object):
             if curr_error == len(errors):
                 break
 
+            if curr_token > len(sent_tokens):
+                break
+
             t = sent_tokens[curr_token]
             so_far += len(t) + 1
 
@@ -245,7 +288,11 @@ class Tutor(object):
                 replace_with = None
 
             if so_far == errors[curr_error]['offset']:
-                replace_with = errors[curr_error]['better'][0]
+                if len(errors[curr_error]['better']) > 0:
+                    replace_with = errors[curr_error]['better'][0]
+                else:
+                    print("error", file=sys.stdout)
+                    print(errors[curr_error], file=sys.stdout)
                 curr_error+=1
 
             curr_token+=1
@@ -263,8 +310,8 @@ class Tutor(object):
         doc = self.nlp(hint)
         possible_keywords = self.get_possible_keywords(doc, cleaned_hint)
 
-        print("Possible keywords", file=sys.stdout)
-        print(possible_keywords, file=sys.stdout)
+        # print("Possible keywords", file=sys.stdout)
+        # print(possible_keywords, file=sys.stdout)
 
         if self.num_in_state > len(possible_keywords) and self.try_tree:
             self.try_tree = False
@@ -281,8 +328,18 @@ class Tutor(object):
             ids = list(range(len(possible_words)))
             ids.sort(key=lambda x: -similarities[x])
 
-            under = [u.text for u in self.get_under(hint_node, graph)]
-            under = self.clean_hint_latex(hint, under)
+            under_words = self.get_under(hint_node, graph)
+            under_words_ids = [int(u.id) for u in under_words]
+
+            min_id = min(under_words_ids)
+            max_id = max(under_words_ids)
+
+            # print(doc.sentences[0].words)
+            to_include = doc.sentences[0].words[min_id: max_id+1]
+            under = [u.text for u in to_include]
+
+            # under = [u.text for u in self.get_under(hint_node, graph)]
+            under = self.clean_hint_latex_2(hint, under)
 
             print("Dependency tree based")
             print(under, file=sys.stdout)
