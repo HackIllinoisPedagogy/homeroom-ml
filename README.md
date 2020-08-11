@@ -7,6 +7,10 @@ Repo housing automated tutor for Pedagogy web app
 - Create a virtual environment, activate it
 - Run `pip install -r requirements.txt`
 
+If this fails, try to install pytorch as described here first: https://pytorch.org/get-started/locally/.
+
+After installing all dependencies, run `python setup.py`.
+
 ## Usage
 
 To start server:
