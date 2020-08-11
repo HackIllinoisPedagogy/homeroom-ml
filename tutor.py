@@ -191,7 +191,7 @@ class Tutor(object):
         return tokens_joined.split(" ")
 
 
-    def clean_hint_latex_2(self, hint, tokens):
+    def clean_hint_latex(self, hint, tokens):
         tokens_joined = " ".join(tokens)
 
         print("tokens joined", file=sys.stdout)
@@ -229,33 +229,6 @@ class Tutor(object):
             out = "$" + out + "$"
 
         return self.clean_curly_braces(hint, out.split(" "))
-
-
-    def clean_hint_latex(self, hint, tokens):
-        l_active = False
-        out_tokens = []
-
-        for token in tokens:
-            if self.in_latex(hint, token):
-                # Update l_active
-                if not l_active:    # We do not already have a starting $
-                    if len(re.findall(r"[$].*?[$]", token)) == 0:   # Not self contained
-                        if "$" in token:
-                            l_active = True
-                        else:
-                            token = "$" + token
-                else:   # We had already started latex
-                    if "$" in token:
-                        l_active = False
-
-            out_tokens.append(token)
-
-        # Need to check if the last token improperly terminated latex
-        if self.in_latex(hint, out_tokens[-1]) and l_active:
-            out_tokens[-1] = out_tokens[-1] + "$"
-
-        return self.clean_curly_braces(hint, out_tokens)
-        # return out_tokens
 
 
     def correct_grammar(self, sentence, sent_tokens=None):
@@ -339,7 +312,7 @@ class Tutor(object):
             under = [u.text for u in to_include]
 
             # under = [u.text for u in self.get_under(hint_node, graph)]
-            under = self.clean_hint_latex_2(hint, under)
+            under = self.clean_hint_latex(hint, under)
 
             print("Dependency tree based")
             print(under, file=sys.stdout)
