@@ -85,12 +85,12 @@ class Tutor(object):
                 min_dist = sim
                 min_idx = i
 
-        return min_idx
+        return min_idx, min_dist
 
 
     def get_hint(self, user_input):
         curr_embedding = self.model.encode(user_input)
-        user_state = self.find_closest(curr_embedding)
+        user_state, sim = self.find_closest(curr_embedding)
 
         if user_state == self.curr_user_state:
             self.num_in_state += 1
@@ -98,6 +98,12 @@ class Tutor(object):
             self.curr_user_state = user_state
             self.num_in_state = 1
             self.try_tree = True
+
+        print("min_dist", file=sys.stdout)
+        print(sim, file=sys.stdout)
+
+        if sim < 0.5:
+            user_state = -1
 
         if user_state == len(self.soln_sep)-1:
             return "You're very close!"
