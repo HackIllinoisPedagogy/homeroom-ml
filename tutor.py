@@ -7,6 +7,8 @@ import requests
 
 from scipy import spatial
 from sentence_transformers import SentenceTransformer
+from question_generation.pipelines import pipeline
+from nltk.metrics.distance import edit_distance
 
 from collections import deque
 
@@ -28,6 +30,9 @@ class Tutor(object):
         self.try_tree = True
         self.grammar_key = 'k94s3qewot7tswUd'
         self.grammar_url = 'https://api.textgears.com/check.php'
+
+        self.question_generator = pipeline("e2e-qg")
+        self.possible_questions = []
 
 
     def load_soln(self, soln):  # Given a solution, load it into the tutor
@@ -165,7 +170,7 @@ class Tutor(object):
         hint_latex_strings = re.findall(r"[$].*?[$]", hint)
 
         for l in hint_latex_strings:
-            if token in l:
+            if token in l.lower():
                 return True
 
         return False
@@ -185,17 +190,32 @@ class Tutor(object):
                 else:
                     num_pre+=1
 
-        tokens_joined = ("".join(["{" for i in range(num_pre)]) +
-            tokens_joined + "".join(["}" for i in range(num_pre)]))
+        tokens_joined = ("".join(["{ " for i in range(num_pre)]) +
+            tokens_joined + "".join([" }" for i in range(num_pre)]))
 
         return tokens_joined.split(" ")
 
 
+    def clean_slashes_latex(self, tokens):
+        out = []
+        for i in range(len(tokens)):
+            t = tokens[i]
+            if "frac{" in t:
+                frac_pos = t.find("frac{")
+                if frac_pos == 0 or t[frac_pos - 1] != "\\":
+                    if len(out) > 0 and out[-1] == "\\":
+                        out.pop()
+                    t = "\\" + t
+            out.append(t)
+        return out
+
+
     def clean_hint_latex(self, hint, tokens):
+        tokens = self.clean_curly_braces(hint, tokens)
+        tokens = self.clean_slashes_latex(tokens)
         tokens_joined = " ".join(tokens)
 
-        print("tokens joined", file=sys.stdout)
-        print(tokens_joined, file=sys.stdout)
+        # print(tokens_joined, file=sys.stdout)
 
         so_far = ""
         need_to_check = True
@@ -207,28 +227,28 @@ class Tutor(object):
         for c in tokens_joined:
             if c == '$':    # Is this closing something before, or opening a new one?
                 if need_to_check:
-                    if self.in_latex(hint, so_far):     # It is closing
-                        num_pre+=1
+                    if self.in_latex(hint, so_far.split(" ")[0]):     # It is closing
                         prepend = True
+                    else:
+                        prev_closing = False
                     need_to_check = False
-                    prev_closing = False
                 else:
                     prev_closing = not prev_closing
             so_far += c
 
         out = ""
         if prepend:
-            out += "$"
+            out += "$ "
 
         out += tokens_joined
 
         if not prev_closing:
-            out += "$"
+            out += " $"
 
         if self.in_latex(hint, out) and "$" not in out:
-            out = "$" + out + "$"
+            out = "$ " + out + " $"
 
-        return self.clean_curly_braces(hint, out.split(" "))
+        return out.split(' ')
 
 
     def correct_grammar(self, sentence, sent_tokens=None):
@@ -250,7 +270,7 @@ class Tutor(object):
             if curr_error == len(errors):
                 break
 
-            if curr_token > len(sent_tokens):
+            if curr_token == len(sent_tokens):
                 break
 
             t = sent_tokens[curr_token]
@@ -273,34 +293,74 @@ class Tutor(object):
         return " ".join(sent_tokens)
 
 
-    def get_sub_hint(self, hint_idx):
-        # First try to do the 'smarter' dependency-tree based hint generation
+    def model_questions(self, hint_idx):
         hint = self.soln_sep[hint_idx]
 
-        # Clean hint of any latex
+        poss_questions = self.question_generator(hint)
+        processed_questions = []
+        for question in poss_questions:
+            cleaned_latex = " ".join(self.clean_hint_latex(hint, question.split()))
+            processed_questions.append(self.fix_question(cleaned_latex, hint))
+        poss_questions = list(set(processed_questions))
+        # print(poss_questions, file=sys.stdout)
+        return poss_questions
+
+
+    def fix_question(self, question, full_hint):
+        non_latex = re.split('[$].*?[$]', question)
+        latex = re.findall('[$].*?[$]', question)
+        hint_latex = re.findall('[$].*?[$]', full_hint)
+
+        m = None
+        m_idx = 0
+
+        for i in range(len(latex)):
+            l1 = latex[i]
+            for j in range(len(hint_latex)):
+                l2 = hint_latex[j]
+                dist = edit_distance(l1, l2)
+
+                if m is None or dist < m:
+                    m = dist
+                    m_idx = j
+
+            if m < 8:   # Very low edit distance, probably the token
+                latex[i] = hint_latex[m_idx]
+                m = None
+
+        curr = 0
+        out = []
+
+        while True:
+            if curr % 2 == 0:
+                if curr/2 > len(non_latex)-1:
+                    break
+                if len(non_latex[curr//2]) > 0:
+                    out.append(non_latex[curr//2])
+            else:
+                if (curr-1)/2 > len(latex)-1:
+                    break
+                out.append(latex[(curr-1)//2])
+            curr+=1
+
+        return " ".join(out)
+
+
+    def dep_tree_questions(self, hint_idx):
+        hint = self.soln_sep[hint_idx]
+
         cleaned_hint = re.sub("\$.*?\$", "", hint)
+        out = []
 
         doc = self.nlp(hint)
         possible_keywords = self.get_possible_keywords(doc, cleaned_hint)
 
-        # print("Possible keywords", file=sys.stdout)
-        # print(possible_keywords, file=sys.stdout)
+        print("Possible keywords", file=sys.stdout)
+        print(possible_keywords)
 
-        if self.num_in_state > len(possible_keywords) and self.try_tree:
-            self.try_tree = False
-            self.num_in_state = 1
+        graph = self.make_graph(doc)
 
-        if len(possible_keywords) > 0 and self.try_tree:
-            graph = self.make_graph(doc)
-            hint_node = possible_keywords[self.num_in_state - 1]
-
-            possible_words = [word.text for word in possible_keywords]
-            word_embeddings = self.model.encode(possible_words)
-            similarities = [self.get_similarity(w_embedding, self.sentence_embeddings[hint_idx]) for w_embedding in word_embeddings]
-
-            ids = list(range(len(possible_words)))
-            ids.sort(key=lambda x: -similarities[x])
-
+        for hint_node in possible_keywords:
             under_words = self.get_under(hint_node, graph)
             under_words_ids = [int(u.id) for u in under_words]
 
@@ -311,13 +371,21 @@ class Tutor(object):
             to_include = doc.sentences[0].words[min_id: max_id+1]
             under = [u.text for u in to_include]
 
-            # under = [u.text for u in self.get_under(hint_node, graph)]
-            under = self.clean_hint_latex(hint, under)
+            extracted_hint = (" ".join(under)).lower()
 
-            print("Dependency tree based")
-            print(under, file=sys.stdout)
+            print("extracted_hint")
+            print(extracted_hint)
 
-            return self.correct_grammar("Consider " + (" ".join(under)).lower() + ". How could this help?")
+            questions = ["Consider " + " ".join(self.clean_hint_latex(hint, extracted_hint.split(" "))) + ". How could this help?"]
+            # questions = [" ".join(self.clean_hint_latex(hint, q.split(" "))) for q in questions]
+
+            out += questions
+
+        return out
+
+    def get_saliency_questions(self, hint_idx):
+        out = []
+        hint = self.soln_sep[hint_idx]
 
         # Find the most salient tokens of hint_idx
         tokens_sep = re.split(' |\n', self.soln_sep[hint_idx])
@@ -328,21 +396,47 @@ class Tutor(object):
             sentence_embedding=self.sentence_embeddings[hint_idx], tokens_sep=tokens_sep)
 
         # What is the length of the sub-hint we should give?
-        len_hint = min(self.num_in_state, self.n_sub_hint) * len(salient_ids) / self.n_sub_hint
-        to_include = [salient_ids[0]]
-        s_id = 1
+        for i in range(1, self.n_sub_hint + 1):
+            len_hint = i * len(salient_ids) / self.n_sub_hint
+            to_include = [salient_ids[0]]
+            s_id = 1
 
-        while max(to_include) - min(to_include) + 1 < len_hint:
-            to_include.append(salient_ids[s_id])
-            s_id += 1
+            while max(to_include) - min(to_include) + 1 < len_hint:
+                to_include.append(salient_ids[s_id])
+                s_id += 1
 
-        including = tokens_sep[min(to_include): max(to_include) + 1]
-        print("Saliency based")
-        print(including, file=sys.stdout)
+            including = tokens_sep[min(to_include): max(to_include) + 1]
 
-        including = self.clean_hint_latex(hint, including)
+            extracted_hint = (" ".join(including)).lower()
 
-        return self.correct_grammar("Consider " + (" ".join(including)).lower() + ". How could this help?")
+            # print("extracted_hint")
+            # print(extracted_hint)
+
+            questions = ["Consider " + " ".join(self.clean_hint_latex(hint, extracted_hint.split(" "))) + ". How could this help?"]
+            # questions = [" ".join(self.clean_hint_latex(hint, q.split(" "))) for q in questions]
+
+            out += questions
+
+        return out
+
+    def get_sub_hint(self, hint_idx):
+        if self.num_in_state == 1:
+
+            model_questions = self.model_questions(hint_idx)
+            dep_tree_questions = self.dep_tree_questions(hint_idx)
+            saliency_questions = self.get_saliency_questions(hint_idx)
+
+            print(len(model_questions), file=sys.stdout)
+            print(len(dep_tree_questions), file=sys.stdout)
+            print(len(saliency_questions), file=sys.stdout)
+
+            self.possible_questions = (model_questions +
+                dep_tree_questions + saliency_questions)
+
+            print(self.possible_questions)
+
+        idx = min(len(self.possible_questions)-1, self.num_in_state-1)
+        return self.possible_questions[idx]
 
 
     def reset_user_state(self):
