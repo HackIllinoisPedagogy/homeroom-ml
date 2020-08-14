@@ -1,5 +1,5 @@
-# pedagogy-ml
-Repo housing automated tutor for Pedagogy web app. Hint content is generated with custom algorithms, and code from https://github.com/patil-suraj/question_generation is involved in phrasing the hint as a question; code from this repo is in directory `\question_generation`. Huge props to them!
+# homeroom-ml
+Repo housing automated tutor for Homeroom web app. Hint content is generated with custom algorithms, and code from https://github.com/patil-suraj/question_generation is involved in phrasing the hint as a question; code from this repo is in directory `\question_generation`. Huge props to them!
 
 ## Install
 
